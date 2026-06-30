@@ -1,0 +1,7 @@
+PyQt5==5.15.11
+paramiko>=3.4.0
+PySocks>=1.7.1
+cryptography>=42.0.0
+pywin32>=306
+loguru>=0.7.0
+pyinstaller>=6.0.0
