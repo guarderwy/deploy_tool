@@ -51,7 +51,12 @@ class Deployer:
             # 1. 安全校验
             _log("安全检查...")
             validate_remote_path(self.project.remote_path, self.project.remote_path)
-            for cmd in self.project.pre_deploy_commands + self.project.post_deploy_commands:
+            check_cmds = []
+            if self.project.enable_pre_commands:
+                check_cmds += self.project.pre_deploy_commands
+            if self.project.enable_post_commands:
+                check_cmds += self.project.post_deploy_commands
+            for cmd in check_cmds:
                 assert_command_safe(cmd)
 
             # 2. 备份
@@ -62,10 +67,11 @@ class Deployer:
                 rec.backup_id = backup.id
 
             # 3. 前置命令
-            cmd_runner = CommandRunner(ssh)
-            for cmd in self.project.pre_deploy_commands:
-                _log(f"前置命令: {cmd}")
-                cmd_runner.run_checked(cmd)
+            if self.project.enable_pre_commands:
+                cmd_runner = CommandRunner(ssh)
+                for cmd in self.project.pre_deploy_commands:
+                    _log(f"前置命令: {cmd}")
+                    cmd_runner.run_checked(cmd)
 
             # 4. 上传 + 删除
             engine = SyncEngine(self.project, ssh)
@@ -86,9 +92,11 @@ class Deployer:
                     rec.files_deleted += 1
 
             # 5. 后置命令
-            for cmd in self.project.post_deploy_commands:
-                _log(f"后置命令: {cmd}")
-                cmd_runner.run_checked(cmd)
+            if self.project.enable_post_commands:
+                cmd_runner = CommandRunner(ssh)
+                for cmd in self.project.post_deploy_commands:
+                    _log(f"后置命令: {cmd}")
+                    cmd_runner.run_checked(cmd)
 
             rec.status = "success"
         except SafetyError as e:

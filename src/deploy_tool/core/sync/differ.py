@@ -147,17 +147,16 @@ class Differ:
 
         # 收集需要 hash 对比的路径（大小相同）
         hash_paths = []
-        for rel in all_paths:
-            l = local.get(rel)
-            r = remote.get(rel)
-            if l and r and l["size"] == r["size"]:
-                hash_paths.append(rel)
+        if use_hash:
+            for rel in all_paths:
+                l = local.get(rel)
+                r = remote.get(rel)
+                if l and r and l["size"] == r["size"]:
+                    hash_paths.append(rel)
 
-        # 批量计算远程 hash（一次性 SSH exec）
+        # 批量计算远程 hash（一次性 SSH exec），仅在 hash 模式下
         remote_hashes = {}
         if use_hash and hash_paths:
-            remote_hashes = self._batch_remote_hashes(hash_paths)
-        elif hash_paths:
             remote_hashes = self._batch_remote_hashes(hash_paths)
 
         total = len(all_paths)
@@ -196,11 +195,7 @@ class Differ:
             if remote_hash is None:
                 return True
             return self._local_hash(l["os_path"]) != remote_hash
-        # 大小相同但 mtime 不同 — 用预计算的 hash 验证
-        if abs(l["mtime"] - r["mtime"]) > 1:
-            if remote_hash is None:
-                return True
-            return self._local_hash(l["os_path"]) != remote_hash
+        # 快速模式：大小相同即视为未修改（SFTP 不保留 mtime，远程 mtime 无参考价值）
         return False
 
     def _batch_remote_hashes(self, rel_paths: list) -> dict:

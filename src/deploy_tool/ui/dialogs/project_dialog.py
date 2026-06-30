@@ -6,7 +6,7 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 
 from ...config.models import Project
 from ...config.store import ConfigStore
-from ...config.presets import apply_preset, get_preset_list
+from ...config.presets import apply_preset, get_preset_list, PROJECT_PRESETS
 
 
 class RemoteBrowserDialog(QtWidgets.QDialog):
@@ -242,15 +242,25 @@ class ProjectDialog(QtWidgets.QDialog):
         g4 = QtWidgets.QGroupBox("前置 / 后置命令 (部署前 / 后在服务器上执行)")
         f4 = QtWidgets.QFormLayout(g4)
 
+        pre_vbox = QtWidgets.QVBoxLayout()
+        self.pre_enable_check = QtWidgets.QCheckBox("启用前置命令")
+        self.pre_enable_check.setChecked(False)
+        pre_vbox.addWidget(self.pre_enable_check)
         self.pre_cmd_edit = QtWidgets.QPlainTextEdit()
         self.pre_cmd_edit.setPlaceholderText("每行一条命令，如:\ncd /var/www/project")
         self.pre_cmd_edit.setFixedHeight(60)
-        f4.addRow("前置命令:", self.pre_cmd_edit)
+        pre_vbox.addWidget(self.pre_cmd_edit)
+        f4.addRow("前置命令:", pre_vbox)
 
+        post_vbox = QtWidgets.QVBoxLayout()
+        self.post_enable_check = QtWidgets.QCheckBox("启用后置命令")
+        self.post_enable_check.setChecked(False)
+        post_vbox.addWidget(self.post_enable_check)
         self.post_cmd_edit = QtWidgets.QPlainTextEdit()
         self.post_cmd_edit.setPlaceholderText("每行一条命令，如:\npm2 restart app")
         self.post_cmd_edit.setFixedHeight(60)
-        f4.addRow("后置命令:", self.post_cmd_edit)
+        post_vbox.addWidget(self.post_cmd_edit)
+        f4.addRow("后置命令:", post_vbox)
 
         main.addWidget(g4)
 
@@ -268,7 +278,7 @@ class ProjectDialog(QtWidgets.QDialog):
         f5.addRow("最大备份数:", self.max_backups)
 
         self.sync_combo = QtWidgets.QComboBox()
-        self.sync_combo.addItems(["大小+时间 (快速)", "SHA256 哈希 (精确)", "Git 版本对比"])
+        self.sync_combo.addItems(["大小对比 (快速)", "SHA256 哈希 (精确)", "Git 版本对比"])
         f5.addRow("对比模式:", self.sync_combo)
         main.addWidget(g5)
 
@@ -295,14 +305,20 @@ class ProjectDialog(QtWidgets.QDialog):
         ptype = self.type_combo.currentData()
         is_git = ptype == "git"
         self._github_group.setVisible(is_git)
-        if ptype and not self._is_edit:
-            apply_preset(self.project, ptype)
-            self._apply_preset_to_ui()
-
-    def _apply_preset_to_ui(self):
-        self.exclude_edit.setPlainText("\n".join(self.project.exclude_patterns))
-        self.pre_cmd_edit.setPlainText("\n".join(self.project.pre_deploy_commands))
-        self.post_cmd_edit.setPlainText("\n".join(self.project.post_deploy_commands))
+        if ptype:
+            preset = PROJECT_PRESETS.get(ptype)
+            if preset:
+                self.exclude_edit.setPlainText(
+                    "\n".join(preset.get("exclude_patterns", []))
+                )
+                self.pre_cmd_edit.setPlainText(
+                    "\n".join(preset.get("pre_deploy_commands", []))
+                )
+                self.post_cmd_edit.setPlainText(
+                    "\n".join(preset.get("post_deploy_commands", []))
+                )
+            self.pre_enable_check.setChecked(False)
+            self.post_enable_check.setChecked(False)
 
     def _browse_local(self):
         path = QtWidgets.QFileDialog.getExistingDirectory(self, "选择本地项目目录")
@@ -337,6 +353,8 @@ class ProjectDialog(QtWidgets.QDialog):
             line.strip() for line in self.post_cmd_edit.toPlainText().splitlines()
             if line.strip()
         ]
+        self.project.enable_pre_commands = self.pre_enable_check.isChecked()
+        self.project.enable_post_commands = self.post_enable_check.isChecked()
         self.project.enable_backup = self.backup_check.isChecked()
         self.project.max_backups = self.max_backups.value()
         self.project.sync_mode = ["size_mtime", "hash", "git_diff"][self.sync_combo.currentIndex()]
@@ -355,14 +373,19 @@ class ProjectDialog(QtWidgets.QDialog):
     def _load_data(self):
         p = self.project
         self.name_edit.setText(p.name)
+        # 阻止信号，避免 setCurrentIndex 触发 _on_type_changed 覆盖已加载的数据
+        self.type_combo.blockSignals(True)
         idx = self.type_combo.findData(p.project_type)
         if idx >= 0:
             self.type_combo.setCurrentIndex(idx)
+        self.type_combo.blockSignals(False)
         self.local_edit.setText(p.local_path)
         self.remote_edit.setText(p.remote_path)
         self.exclude_edit.setPlainText("\n".join(p.exclude_patterns))
         self.pre_cmd_edit.setPlainText("\n".join(p.pre_deploy_commands))
         self.post_cmd_edit.setPlainText("\n".join(p.post_deploy_commands))
+        self.pre_enable_check.setChecked(p.enable_pre_commands)
+        self.post_enable_check.setChecked(p.enable_post_commands)
         self.backup_check.setChecked(p.enable_backup)
         self.max_backups.setValue(p.max_backups)
         idx_map = {"size_mtime": 0, "hash": 1, "git_diff": 2}

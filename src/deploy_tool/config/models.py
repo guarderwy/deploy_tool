@@ -6,6 +6,12 @@ import uuid
 import dataclasses
 
 
+# 项目默认排除规则（在 dataclass 字段之前定义以便复用）
+DEFAULT_EXCLUDE_PATTERNS: List[str] = [
+    ".git/", "node_modules/", "*.pyc", "__pycache__/", "*.log",
+]
+
+
 class AuthMethod(Enum):
     PASSWORD = "password"
     KEY = "key"
@@ -66,9 +72,11 @@ class Project:
     local_path: str = ""
     remote_path: str = ""
     exclude_patterns: List[str] = field(
-        default_factory=lambda: [".git/", "node_modules/", "*.pyc", "__pycache__/", "*.log"])
+        default_factory=lambda: list(DEFAULT_EXCLUDE_PATTERNS))
     pre_deploy_commands: List[str] = field(default_factory=list)
     post_deploy_commands: List[str] = field(default_factory=list)
+    enable_pre_commands: bool = False
+    enable_post_commands: bool = False
     enable_backup: bool = True
     max_backups: int = 5
     sync_mode: str = "size_mtime"   # "size_mtime" | "hash"
