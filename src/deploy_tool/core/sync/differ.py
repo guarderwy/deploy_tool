@@ -76,11 +76,12 @@ class Differ:
 
             if status_code == "D":
                 try:
+                    # 使用 git cat-file -s 直接获取文件大小，避免读取整个文件内容
                     r = subprocess.run(
-                        ["git", "-C", root, "show", f"HEAD:{rel}"],
-                        capture_output=True, timeout=10,
+                        ["git", "-C", root, "cat-file", "-s", f"HEAD:{rel}"],
+                        capture_output=True, text=True, timeout=10,
                     )
-                    remote_size = len(r.stdout)
+                    remote_size = int(r.stdout.strip()) if r.returncode == 0 else 0
                 except Exception:
                     remote_size = 0
                 diffs.append(FileDiff(
@@ -96,11 +97,12 @@ class Differ:
             else:
                 local_size = os.path.getsize(full_path) if os.path.isfile(full_path) else 0
                 try:
+                    # 使用 git cat-file -s 直接获取文件大小，避免读取整个文件内容
                     r = subprocess.run(
-                        ["git", "-C", root, "show", f"HEAD:{rel}"],
-                        capture_output=True, timeout=10,
+                        ["git", "-C", root, "cat-file", "-s", f"HEAD:{rel}"],
+                        capture_output=True, text=True, timeout=10,
                     )
-                    remote_size = len(r.stdout)
+                    remote_size = int(r.stdout.strip()) if r.returncode == 0 else 0
                 except Exception:
                     remote_size = 0
                 diffs.append(FileDiff(
@@ -213,16 +215,22 @@ class Differ:
             cmd = " ".join(cmd_parts)
             code, out, err = self.ssh.exec(cmd, timeout=300)
             if code == 0 and out:
+                # 构建路径到rel的映射表，用于精确匹配
+                path_to_rel = {}
+                for rel in batch:
+                    full_path = f"{root}/{rel}"
+                    path_to_rel[full_path] = rel
+                    # 也记录带 * 前缀的二进制模式
+                    path_to_rel[f"*{full_path}"] = rel
+                
                 for line in out.splitlines():
                     parts = line.strip().split(None, 1)
                     if len(parts) == 2:
                         h = parts[0]
-                        filepath = parts[1].lstrip("*")  # sha256sum may print * as binary marker
-                        # 从 filepath 反推出 rel
-                        for rel in batch:
-                            if filepath.endswith(rel):
-                                remote_hashes[rel] = h
-                                break
+                        filepath = parts[1]  # 保留原始格式（可能带 * 前缀）
+                        # 精确匹配完整路径
+                        if filepath in path_to_rel:
+                            remote_hashes[path_to_rel[filepath]] = h
             else:
                 # sha256sum 不可用，fallback 到每个文件单独取
                 for rel in batch:
@@ -255,7 +263,7 @@ class Differ:
         return result
 
     def _scan_remote(self) -> Dict[str, Dict[str, Any]]:
-        """扫描远程目录"""
+        """扫描远程目录 - 使用 find 命令一次性获取文件列表，提升性能"""
         result: Dict[str, Dict[str, Any]] = {}
         sftp = self.ssh.sftp()
         root = self.project.remote_path
@@ -263,6 +271,48 @@ class Differ:
             sftp.stat(root)
         except IOError:
             return result
+        
+        # 尝试使用 find 命令一次性获取所有文件信息（性能优化）
+        try:
+            # find 输出格式: size mtime path
+            cmd = f"find {shlex.quote(root)} -type f -printf '%s %T@ %p\\n' 2>/dev/null"
+            code, out, err = self.ssh.exec(cmd, timeout=120)
+            if code == 0 and out:
+                for line in out.strip().splitlines():
+                    if not line.strip():
+                        continue
+                    # 解析 find 输出: size mtime path
+                    parts = line.split(None, 2)
+                    if len(parts) != 3:
+                        continue
+                    try:
+                        size = int(parts[0])
+                        mtime = float(parts[1])
+                        filepath = parts[2]
+                        
+                        # 计算相对路径
+                        if filepath.startswith(root):
+                            rel = filepath[len(root):].lstrip("/")
+                        else:
+                            rel = filepath
+                        
+                        # 应用排除规则
+                        if self.filter.is_excluded(rel):
+                            continue
+                        
+                        result[rel] = {
+                            "rel": rel,
+                            "remote_path": filepath,
+                            "size": size,
+                            "mtime": mtime,
+                        }
+                    except (ValueError, IndexError):
+                        continue
+                return result
+        except Exception:
+            pass  # find 失败时回退到 SFTP 递归扫描
+        
+        # Fallback: 使用 SFTP 递归扫描（原有逻辑）
         for entry in self._walk_remote(sftp, root, ""):
             result[entry["rel"]] = entry
         return result

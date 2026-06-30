@@ -70,8 +70,12 @@ class Deployer:
             if self.project.enable_pre_commands:
                 cmd_runner = CommandRunner(ssh)
                 for cmd in self.project.pre_deploy_commands:
+                    # 自动切换到项目目录执行命令
+                    full_cmd = f"cd {self.project.remote_path} && {cmd}"
                     _log(f"前置命令: {cmd}")
-                    cmd_runner.run_checked(cmd)
+                    output = cmd_runner.run_checked(full_cmd)
+                    if output.strip():
+                        _log(f"命令输出:\n{output}")
 
             # 4. 上传 + 删除
             engine = SyncEngine(self.project, ssh)
@@ -95,8 +99,12 @@ class Deployer:
             if self.project.enable_post_commands:
                 cmd_runner = CommandRunner(ssh)
                 for cmd in self.project.post_deploy_commands:
+                    # 自动切换到项目目录执行命令
+                    full_cmd = f"cd {self.project.remote_path} && {cmd}"
                     _log(f"后置命令: {cmd}")
-                    cmd_runner.run_checked(cmd)
+                    output = cmd_runner.run_checked(full_cmd)
+                    if output.strip():
+                        _log(f"命令输出:\n{output}")
 
             rec.status = "success"
         except SafetyError as e:
